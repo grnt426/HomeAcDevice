@@ -23,9 +23,13 @@ Adafruit_MCP23008 mcp;
 
 const char* device_id = "ac_alpha";
 
+#ifndef WIFI_SECRET
+#error("Please create a wifi_pass.secret.h file with wifi credentials. See the project page for informaiton: https://github.com/grnt426/HomeAcDevice")
+#else
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASS;
 const char* mqtt_server = WIFI_SERV;
+#endif
 
 uint8_t temp = 72;
 uint8_t buttonPressed = 0;
