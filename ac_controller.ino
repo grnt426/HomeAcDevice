@@ -14,28 +14,8 @@
 #include "wifi_pass.secret.h"
 
 #define OLED_RESET 0
-Adafruit_SSD1306 display(OLED_RESET);
-Adafruit_MCP23008 mcp;
 
-#if (SSD1306_LCDHEIGHT != 64)
-#error("Height incorrect, please fix Adafruit_SSD1306.h!");
-#endif
-
-const char* device_id = "ac_alpha";
-
-#ifndef WIFI_SECRET
-#error("Please create a wifi_pass.secret.h file with wifi credentials. See the project page for informaiton: https://github.com/grnt426/HomeAcDevice")
-#else
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASS;
-const char* mqtt_server = WIFI_SERV;
-#endif
-
-uint8_t temp = 72;
-uint8_t buttonPressed = 0;
-uint8_t screenUpdate = 0;
-
-// Button Map on the MCP
+// Button Map on the MCP (8-bit address)
 #define B_TEMP_D 0
 #define B_TEMP_U 1
 #define B_MODE   2
@@ -45,34 +25,87 @@ uint8_t screenUpdate = 0;
 #define B_UNDF_2 6
 #define B_UNDF_3 7
 
+// Pins on the ESP
 #define P_IR_SEN 14
 #define P_IR_LED 16
 
+// Known IR flash codes for the AC
 #define IR_DEAD_CODE 0xFFFFFFFFFFFFFFFF
 #define FC_POWER_TOGGLE 0x10AF8877
 #define FC_TEMP_UP 0x10AF708F
 #define FC_TEMP_DN 0x10AFB04F
 
-const char* mode_map[] = {"cool", "save", "fan"};
-const uint8_t mode_len = 3;
-uint8_t mode_sel = 1;
+/**
+ * Screen Setup 
+ */
+Adafruit_SSD1306 display(OLED_RESET);
 
-const char* fan_map[] = {"auto", "high", "med", "low"};
-const uint8_t fan_len = 4;
-uint8_t fan_sel = 3;
+#if (SSD1306_LCDHEIGHT != 64)
+#error("Height incorrect, please fix Adafruit_SSD1306.h!");
+#endif
 
-uint8_t power_state = 1;
+/**
+ * Wifi Setup
+ */
 
+#ifndef WIFI_SECRET
+#error("Please create a wifi_pass.secret.h file with wifi credentials. See the project page for informaiton: https://github.com/grnt426/HomeAcDevice")
+#else
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASS;
+const char* mqtt_server = WIFI_SERV;
+#endif
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Wifi state data
+long lastMsg = 0;
+char msg[50];
+
+// MQTT Unique self-ID
+const char* device_id = "ac_alpha";
+
+/**
+ * IR LED/Sensor Setup
+ */
 IRsend irsend(P_IR_LED);
-
 IRrecv irrecv(P_IR_SEN);
 decode_results results;
 irparams_t save;
 
-WiFiClient espClient;
-PubSubClient client(espClient);
-long lastMsg = 0;
-char msg[50];
+/**
+ * MCP (Port Expander) Setup
+ */
+Adafruit_MCP23008 mcp;
+
+/**
+ * Device State Information
+ */
+uint8_t temp = 72;
+
+// 0 indicates no button is currently held down, 1 means at least one button is held down
+uint8_t buttonPressed = 0;
+
+// 0 means don't redraw, 1 means redraw the screen
+uint8_t screenUpdate = 0;
+
+// The AC has three modes
+// 1) cool - actively uses the compressor to cool the air.
+// 2) save - Energy Save will turn the compressor on and off.
+// 3) fan - only the fan will run
+const char* mode_map[] = {"cool", "save", "fan"};
+const uint8_t mode_len = 3;
+uint8_t mode_sel = 1;
+
+// The fan on the AC has four settings; auto will let the AC choose which of the three speeds to use
+const char* fan_map[] = {"auto", "high", "med", "low"};
+const uint8_t fan_len = 4;
+uint8_t fan_sel = 3;
+
+// Whether or not the AC is on, and therefore whether this interface will respond to controls
+uint8_t power_state = 1;
+
 
 void setup()   {                
   Serial.begin(115200);
@@ -80,7 +113,7 @@ void setup()   {
   Serial.print("Booting as ");
   Serial.println(device_id);
 
-  // initialize with the I2C addr 0x3D (for the 128x64)
+  // initialize with the I2C addr 0x3D (for the OLED)
   display.begin(SSD1306_SWITCHCAPVCC, 0x3D);
   display.clearDisplay();
   display.setTextColor(WHITE);
@@ -106,14 +139,17 @@ void setup()   {
   setup_wifi();
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
-  
+
+  // We want the screen to draw something after setup is complete, as usually garbaged is initialized
+  // TODO: display a splash/loading screen before setup starts.
   screenUpdate = 1;
 }
 
 void setup_wifi() {
 
+  // TODO: is this delay necessary? I think the wifi chip can take time to settle before it can be meaningfully used.
   delay(10);
-  // We start by connecting to a WiFi network
+  
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
@@ -132,6 +168,9 @@ void setup_wifi() {
   Serial.println(WiFi.localIP());
 }
 
+/**
+ * Used by the MQTT handler to process messages from topics we are subscribed to.
+ */
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
@@ -142,11 +181,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.println();
 
   // Switch on the AC if a 1 was received as first character
+  // TODO: Need to allow processing of arbitrary commands/flash codes
   if ((char)payload[0] == '1') {
     controlAc(FC_POWER_TOGGLE);
   }
 }
 
+/**
+ * Used to reconnect to the MQTT server, *NOT* the WiFi.
+ * TODO: This will hold up the device for 5 seconds, should instead use a timer to trigger when to attempt reconnecting.
+ */
 void reconnect() {
   Serial.print("Attempting MQTT connection...");
 
@@ -158,7 +202,8 @@ void reconnect() {
 
     snprintf (msg, 75, "ac/%s", device_id);
     client.subscribe(msg);
-  } else {
+  }
+  else {
     Serial.print("failed, rc=");
     Serial.print(client.state());
     Serial.println(" try again in 5 seconds");
@@ -166,6 +211,9 @@ void reconnect() {
   }
 }
 
+/**
+ * Core device loop, which checks inputs across all channels, applies changes, and then redraws.
+ */
 void loop() {
   checkWifi();
   
@@ -176,6 +224,10 @@ void loop() {
   drawScreen();
 }
 
+/**
+ * The WiFi chip time-shares with the host application, so we need to check in with the chip on occasion to
+ * see if it needs to do any work.
+ */
 void checkWifi() {
   if (!client.connected()) {
     reconnect();
@@ -215,6 +267,10 @@ void drawScreen(void) {
   }
 }
 
+/**
+ * Check all the buttons on the device, not allowing a button to be held down for repeat commands.
+ * When the AC is off, this will only allow power button to be pressed.
+ */
 void checkButtons(void) {
 
   if(buttonPressed == 1 && mcp.digitalRead(B_TEMP_U) == 0 && mcp.digitalRead(B_TEMP_D) == 0 
@@ -266,6 +322,9 @@ void checkIrSensor(void) {
   }
 }
 
+/**
+ * TODO: holdover code, should be redone
+ */
 void dumpCode(decode_results *results) {
 
   // Now dump "known" codes

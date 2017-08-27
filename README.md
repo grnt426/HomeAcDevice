@@ -3,6 +3,8 @@ AC Controller
 
 To control window AC units with a control interface that works with commands from buttons, IR remotes, and MQTT messages.
 
+Talks to the [HomeServer](https://github.com/grnt426/HomeServer)
+
 Building The Project
 ======================
 
