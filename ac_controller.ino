@@ -31,9 +31,15 @@
 
 // Known IR flash codes for the AC
 #define IR_DEAD_CODE 0xFFFFFFFFFFFFFFFF
-#define FC_POWER_TOGGLE 0x10AF8877
+#define FC_POWER_T 0x10AF8877
 #define FC_TEMP_UP 0x10AF708F
 #define FC_TEMP_DN 0x10AFB04F
+#define FC_FAN_DN  0x10AF20DF
+#define FC_FAN_UP  0x10AF807F
+#define FC_COOL    0x10AF906F
+#define FC_SAVE    0x10AF40BF
+#define FC_FAN_O   0x10AFE01F
+#define FC_FAN_A   0x10AFF00F 
 
 /**
  * Screen Setup 
@@ -95,19 +101,19 @@ uint8_t screenUpdate = 0;
 // 2) save - Energy Save will turn the compressor on and off.
 // 3) fan - only the fan will run
 const char* mode_map[] = {"cool", "save", "fan"};
+int mode_fc_map[] = {FC_COOL, FC_SAVE, FC_FAN_O};
 const uint8_t mode_len = 3;
-uint8_t mode_sel = 1;
+int mode_sel = 1;
 
 // The fan on the AC has four settings; auto will let the AC choose which of the three speeds to use
 const char* fan_map[] = {"auto", "high", "med", "low"};
 const uint8_t fan_len = 4;
-uint8_t fan_sel = 3;
+int fan_sel = 3;
 
 // Whether or not the AC is on, and therefore whether this interface will respond to controls
 uint8_t power_state = 1;
 
-
-void setup()   {                
+void setup() {
   Serial.begin(115200);
 
   Serial.print("Booting as ");
@@ -117,6 +123,7 @@ void setup()   {
   display.begin(SSD1306_SWITCHCAPVCC, 0x3D);
   display.clearDisplay();
   display.setTextColor(WHITE);
+  drawSplashScreen();
 
   // use the default address of 0 on the i2c bridge
   mcp.begin();
@@ -136,16 +143,23 @@ void setup()   {
   pinMode(P_IR_LED, OUTPUT);
   irrecv.enableIRIn();
 
-  setup_wifi();
+  setupWifi();
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 
-  // We want the screen to draw something after setup is complete, as usually garbaged is initialized
-  // TODO: display a splash/loading screen before setup starts.
+  // Replace the splash screen with the current status
   screenUpdate = 1;
 }
 
-void setup_wifi() {
+void drawSplashScreen() {
+  display.setFont(&FreeSans12pt7b);
+  display.setTextSize(3);
+  display.setCursor(27,64);
+  display.print(":)");
+  display.display();
+}
+
+void setupWifi() {
 
   // TODO: is this delay necessary? I think the wifi chip can take time to settle before it can be meaningfully used.
   delay(10);
@@ -175,16 +189,10 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-
-  // Switch on the AC if a 1 was received as first character
-  // TODO: Need to allow processing of arbitrary commands/flash codes
-  if ((char)payload[0] == '1') {
-    controlAc(FC_POWER_TOGGLE);
-  }
+  char* str = (char *) payload;
+  str[length] = '\0';
+  Serial.println(str);
+  processIrCommand((int)strtol(str, NULL, 0));
 }
 
 /**
@@ -281,7 +289,6 @@ void checkButtons(void) {
   if(mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
     Serial.println("B_POWER Button Pressed");
     togglePower();
-    buttonPressed = 1;
   }
 
   if(power_state == 0) {
@@ -291,63 +298,54 @@ void checkButtons(void) {
   if(mcp.digitalRead(B_TEMP_D) == 1 && buttonPressed == 0 && temp > 59) {
     Serial.println("B_TEMP_D Button Pressed");
     lowerTemp();
-    screenUpdate = 1;
   }
 
   if(mcp.digitalRead(B_TEMP_U) == 1 && buttonPressed == 0 && temp < 90) {
     Serial.println("B_TEMP_U Button Pressed");
     raiseTemp();
-    screenUpdate = 1;
   }
 
   if(mcp.digitalRead(B_MODE) == 1 && buttonPressed == 0) {
     Serial.println("B_MODE Button Pressed");
-    mode_sel = (mode_sel + 1) % mode_len;
-    buttonPressed = 1;
-    screenUpdate = 1;
+    cycleMode();
   }
 
   if(mcp.digitalRead(B_FAN) == 1 && buttonPressed == 0) {
     Serial.println("B_FAN Button Pressed");
-    fan_sel = (fan_sel + 1) % fan_len;
-    buttonPressed = 1;
-    screenUpdate = 1;
+    cycleFan();
   }
 }
 
 void checkIrSensor(void) {
   if (irrecv.decode(&results, &save)) {
-    Serial.println("IR Signal seen!");
-    dumpCode(&results);
-  }
-}
-
-/**
- * TODO: holdover code, should be redone
- */
-void dumpCode(decode_results *results) {
-
-  // Now dump "known" codes
-  uint64_t code = results->value;
-  if (results->decode_type != UNKNOWN && code != IR_DEAD_CODE) {
-    serialPrintUint64(code, 16);
-    Serial.println("");
-    processIrCommand(code);
+    uint64_t code = results.value;
+    if (results.decode_type != UNKNOWN && code != IR_DEAD_CODE) {
+      serialPrintUint64(code, 16);
+      Serial.println("");
+      processIrCommand(code);
+    }
   }
 }
 
 void processIrCommand(uint64_t code) {
   switch(code) {
-    case FC_POWER_TOGGLE : Serial.print("Power flash"); togglePower(); break;
-    case FC_TEMP_UP : Serial.print("Temp Up flash"); raiseTemp(); break;
-    case FC_TEMP_DN : Serial.print("Temp Down flash"); lowerTemp(); break;
-    default: Serial.print("Unknown code:"); serialPrintUint64(code, 16);
+    case FC_POWER_T : Serial.println("Power flash"); togglePower(); break;
+    case FC_TEMP_UP : Serial.println("Temp Up flash"); raiseTemp(); break;
+    case FC_TEMP_DN : Serial.println("Temp Down flash"); lowerTemp(); break;
+    case FC_FAN_UP  : Serial.println("Fan Up flash"); fanUp(); break;
+    case FC_FAN_DN  : Serial.println("Fan Down flash"); cycleFan(); break;
+    case FC_COOL    : Serial.println("Cool flash"); modeSet(FC_COOL); break;
+    case FC_SAVE    : Serial.println("Energy Save flash"); modeSet(FC_SAVE); break;
+    case FC_FAN_O   : Serial.println("Fan Only flash"); modeSet(FC_FAN_O); break;
+    case FC_FAN_A   : Serial.println("Fan Auto flash"); fanSet(FC_FAN_A); break;
+    default: Serial.println("Unknown code: "); serialPrintUint64(code, 16); Serial.println("");
   }
 }
 
 void togglePower(void) {
   power_state = (power_state + 1) % 2;
-  controlAc(FC_POWER_TOGGLE);
+  controlAc(FC_POWER_T);
+  buttonPressed = 1;
   screenUpdate = 1;
 }
 
@@ -365,9 +363,54 @@ void lowerTemp(void) {
   screenUpdate = 1;
 }
 
+void cycleMode(void) {
+  mode_sel = (mode_sel + 1) % mode_len;
+  controlAc(mode_fc_map[mode_sel]);
+  buttonPressed = 1;
+  screenUpdate = 1;
+}
+
+void cycleFan(void) {
+  fan_sel = (fan_sel + 1) % fan_len;
+  controlAc(FC_FAN_DN);
+  buttonPressed = 1;
+  screenUpdate = 1;
+}
+
+void fanUp(void) {
+  fan_sel--;
+  if(fan_sel < 0){
+    fan_sel = fan_len - 1;
+  }
+  controlAc(FC_FAN_UP);
+  buttonPressed = 1;
+  screenUpdate = 1;
+}
+
+void modeSet(uint64_t mode) {
+  if(mode == FC_COOL){
+    mode_sel = 0;
+  }
+  else if(mode == FC_SAVE){
+    mode_sel = 1;
+  }
+  else{
+    mode_sel = 2;
+  }
+  screenUpdate = 1;
+  controlAc(mode);
+}
+
+void fanSet(uint64_t setting){
+  fan_sel = 0;
+  controlAc(setting);
+  screenUpdate = 1;
+}
+
 void controlAc(const uint64_t command) {
   Serial.print("Flashing: ");
   serialPrintUint64(command, 16);
+  Serial.println("");
   irsend.sendNEC(command, 32);
 }
 
