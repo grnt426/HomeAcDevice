@@ -15,6 +15,7 @@
 #include "wifi_pass.secret.h"
 #include "granite_logo.h"
 #include "mqtt_handler.h"
+#include "timer.h"
 
 #define OLED_RESET 0
 
@@ -109,6 +110,14 @@ int mqtt_orig_init = 0;
 int wifi_finally_con = 0;
 int splash_on = 1;
 
+int mqtt_state = 0;
+uint8_t mqtt_state_anim_t = registerTimer(500);
+int mqtt_anim_p = 0;
+
+int wifi_state = 0;
+uint8_t wifi_state_anim_t = registerTimer(500);
+int wifi_anim_p = 0;
+
 void setup() {
   Serial.begin(115200);
 
@@ -174,10 +183,9 @@ void setupWifi() {
  * Core device loop, which checks inputs across all channels, applies changes, and then redraws.
  */
 void loop() {
+  checkNetworkStatus();
 
-  setupWifi();
-  
-  checkMqtt();
+  processTimers();
   
   checkButtons();
 
@@ -186,9 +194,40 @@ void loop() {
   drawScreen();
 }
 
+void checkNetworkStatus() {
+  setupWifi();
+
+  mqtt_state = checkMqtt();
+  switch(mqtt_state) {
+    case -1: // Retrying
+      break;
+    case 0: // Unstarted
+      break;
+    case 1: // Still connected
+      break;
+    case 2: // Reconnected
+      screenUpdate = 1;
+      syncDeviceState(power_state, temp, mode_sel, fan_sel);
+      break;
+    default: Serial.println("Unknown MQTT network state");
+  }
+}
+
 void drawScreen(void) {
+
+  if(mqtt_state != 1 && mqtt_state != 2 && splash_on == 0) {
+    if(isTimerPassed(mqtt_state_anim_t)) {
+      screenUpdate = 1;
+      Serial.println("Flipping mqtt anim state");
+      resetTimer(mqtt_state_anim_t);
+      mqtt_anim_p = 1 - mqtt_anim_p;
+    }
+  }
+
+  // Only update if we need to. We want the splash screen to display at startup for a while, too.
   if(screenUpdate == 1 || (millis() > 5000 && splash_on == 1)){
     splash_on = 0;
+    
     if(power_state == 1){
       display.clearDisplay(); 
       display.setFont(&FreeSans12pt7b);
@@ -202,8 +241,6 @@ void drawScreen(void) {
       display.print(mode_map[mode_sel]);
       display.setCursor(0, 64);
       display.print(fan_map[fan_sel]);
-      display.display();
-      screenUpdate = 0;
     }
     else{
       display.clearDisplay(); 
@@ -211,9 +248,20 @@ void drawScreen(void) {
       display.setTextSize(1);
       display.setCursor(0,20);
       display.print("Off");
-      display.display();
-      screenUpdate = 0;
     }
+
+    if(mqtt_state != 1 && mqtt_state != 2) {
+      display.setFont(&TomThumb);
+      display.setTextSize(1);
+      display.setCursor(0, 30);
+      display.print("no mqtt");
+      if(mqtt_anim_p) {
+        display.print("*");
+      }
+    }
+
+    screenUpdate = 0;
+    display.display();
   }
 }
 

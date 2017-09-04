@@ -17,9 +17,9 @@ extern WiFiClient espClient;
 
 void callback(char* topic, byte* payload, unsigned int length);
 
-void reconnect();
+int reconnect();
 
-void checkMqtt();
+int checkMqtt();
 
 void mqttSetup();
 
