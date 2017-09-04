@@ -115,11 +115,19 @@ uint8_t mqtt_state_anim_t = registerTimer(500);
 int mqtt_anim_p = 0;
 
 int wifi_state = 0;
-uint8_t wifi_state_anim_t = registerTimer(500);
-int wifi_anim_p = 0;
+
+uint8_t off_anim_t = registerTimer(50);
+int off_x_v;
+int off_y_v;
+int off_x = 55;
+int off_y = 25;
 
 void setup() {
   Serial.begin(115200);
+
+  // Analog pin 2 is unused, so we can use it as a pseudo-random source for a seed
+  randomSeed(analogRead(2));
+  offAnimRandomVector(1, 1);
 
   Serial.print("Booting as ");
   Serial.println(device_id);
@@ -169,12 +177,14 @@ void setupWifi() {
     WiFi.begin(ssid, password);
   }
   else{
-      if(wifi_finally_con == 0 && WiFi.status() == WL_CONNECTED) {
-        Serial.println("");
-        Serial.println("WiFi connected");
-        Serial.println("IP address: ");
-        Serial.println(WiFi.localIP());
-        wifi_finally_con = 1;
+    if(wifi_finally_con == 0 && WiFi.status() == WL_CONNECTED) {
+      Serial.println("");
+      Serial.println("WiFi connected");
+      Serial.println("IP address: ");
+      Serial.println(WiFi.localIP());
+      wifi_state = 1;
+      wifi_finally_con = 1;
+      screenUpdate = 1;
     }
   }
 }
@@ -197,6 +207,19 @@ void loop() {
 void checkNetworkStatus() {
   setupWifi();
 
+  if(WiFi.status() == WL_CONNECTED) {
+    if(wifi_state != 1) {
+      screenUpdate = 1;
+    }
+    wifi_state = 1;
+  }
+  else {
+    if(wifi_state != 0) {
+      screenUpdate = 1;
+    }
+    wifi_state = 0;
+  }
+
   mqtt_state = checkMqtt();
   switch(mqtt_state) {
     case -1: // Retrying
@@ -218,18 +241,49 @@ void drawScreen(void) {
   if(mqtt_state != 1 && mqtt_state != 2 && splash_on == 0) {
     if(isTimerPassed(mqtt_state_anim_t)) {
       screenUpdate = 1;
-      Serial.println("Flipping mqtt anim state");
       resetTimer(mqtt_state_anim_t);
       mqtt_anim_p = 1 - mqtt_anim_p;
+    }
+  }
+
+  if(power_state == 0) {
+    if(isTimerPassed(off_anim_t)) {
+      resetTimer(off_anim_t);
+      screenUpdate = 1;
+
+      off_x += off_x_v;
+      off_y += off_y_v;
+      
+      if(off_x <= 0 || off_x >= 95) {
+        offAnimRandomVector(1, 0);
+        if(off_x <= 0) {
+          off_x = 1;
+        }
+        else {
+          off_x = 95;
+          off_x_v *= -1;
+        }
+      }
+      
+      if(off_y <= 20 || off_y >= 64) {
+        offAnimRandomVector(0, 1);
+        if(off_y <= 20) {
+          off_y = 20;
+        }
+        else {
+          off_y = 64;
+          off_y_v *= -1;
+        }
+      }
     }
   }
 
   // Only update if we need to. We want the splash screen to display at startup for a while, too.
   if(screenUpdate == 1 || (millis() > 5000 && splash_on == 1)){
     splash_on = 0;
+    display.clearDisplay();
     
-    if(power_state == 1){
-      display.clearDisplay(); 
+    if(power_state == 1){ 
       display.setFont(&FreeSans12pt7b);
       display.setTextSize(4);
       display.setCursor(27,64);
@@ -243,10 +297,9 @@ void drawScreen(void) {
       display.print(fan_map[fan_sel]);
     }
     else{
-      display.clearDisplay(); 
       display.setFont(&FreeSans12pt7b);
       display.setTextSize(1);
-      display.setCursor(0,20);
+      display.setCursor(off_x, off_y);
       display.print("Off");
     }
 
@@ -258,6 +311,13 @@ void drawScreen(void) {
       if(mqtt_anim_p) {
         display.print("*");
       }
+    }
+
+    if(wifi_state == 0) {
+      display.setFont(&TomThumb);
+      display.setTextSize(1);
+      display.setCursor(0, 40);
+      display.print("no wifi");
     }
 
     screenUpdate = 0;
@@ -403,5 +463,10 @@ void controlAc(const uint64_t command) {
   Serial.println("");
   irsend.sendNEC(command, 32);
   syncDeviceState(power_state, temp, mode_sel, fan_sel);
+}
+
+void offAnimRandomVector(int changeX, int changeY) {
+  off_x_v = changeX ? random(1, 4) : off_x_v;
+  off_y_v = changeY ? random(1, 4) : off_y_v;
 }
 

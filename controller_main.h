@@ -31,4 +31,6 @@ void controlAc(uint64_t fc);
 
 void checkNetworkStatus();
 
+void offAnimRandomVector(int x, int y);
+
 #endif
