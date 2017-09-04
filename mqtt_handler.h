@@ -5,13 +5,13 @@
 #ifndef WIFI_SECRET
 #error("Please create a wifi_pass.secret.h file with wifi credentials. See the project page for informaiton: https://github.com/grnt426/HomeAcDevice")
 #else
-extern const char* mqtt_server;
+extern const char* mqttServer;
 #endif
 
 // MQTT Unique self-ID
-extern const char* device_id;
+extern const char* deviceId;
 
-extern int wifi_orig_init;
+extern int wifiOrigInit;
 
 extern WiFiClient espClient;
 

@@ -43,11 +43,11 @@
 #define FC_COOL    0x10AF906F
 #define FC_SAVE    0x10AF40BF
 #define FC_FAN_O   0x10AFE01F
-#define FC_FAN_A   0x10AFF00F 
+#define FC_FAN_A   0x10AFF00F
 
 /**
- * Screen Setup 
- */
+   Screen Setup
+*/
 Adafruit_SSD1306 display(OLED_RESET);
 
 #if (SSD1306_LCDHEIGHT != 64)
@@ -55,8 +55,8 @@ Adafruit_SSD1306 display(OLED_RESET);
 #endif
 
 /**
- * Wifi Setup
- */
+   Wifi Setup
+*/
 
 #ifndef WIFI_SECRET
 #error("Please create a wifi_pass.secret.h file with wifi credentials. See the project page for informaiton: https://github.com/grnt426/HomeAcDevice")
@@ -66,21 +66,21 @@ const char* password = WIFI_PASS;
 #endif
 
 /**
- * IR LED/Sensor Setup
- */
+   IR LED/Sensor Setup
+*/
 IRsend irsend(P_IR_LED);
 IRrecv irrecv(P_IR_SEN);
 decode_results results;
 irparams_t save;
 
 /**
- * MCP (Port Expander) Setup
- */
+   MCP (Port Expander) Setup
+*/
 Adafruit_MCP23008 mcp;
 
 /**
- * Device State Information
- */
+   Device State Information
+*/
 uint8_t temp = 72;
 
 // 0 indicates no button is currently held down, 1 means at least one button is held down
@@ -93,34 +93,34 @@ uint8_t screenUpdate = 0;
 // 1) cool - actively uses the compressor to cool the air.
 // 2) save - Energy Save will turn the compressor on and off.
 // 3) fan - only the fan will run
-const char* mode_map[] = {"cool", "save", "fan"};
-int mode_fc_map[] = {FC_COOL, FC_SAVE, FC_FAN_O};
-const uint8_t mode_len = 3;
-int mode_sel = 1;
+const char* modeMap[] = {"cool", "save", "fan"};
+int modeFcMap[] = {FC_COOL, FC_SAVE, FC_FAN_O};
+const uint8_t modeLen = 3;
+int modeSel = 1;
 
 // The fan on the AC has four settings; auto will let the AC choose which of the three speeds to use
-const char* fan_map[] = {"auto", "high", "med", "low"};
-const uint8_t fan_len = 4;
-int fan_sel = 3;
+const char* fanMap[] = {"auto", "high", "med", "low"};
+const uint8_t fanLen = 4;
+int fanSel = 3;
 
 // Whether or not the AC is on, and therefore whether this interface will respond to controls
-uint8_t power_state = 1;
+uint8_t powerState = 1;
 
-int mqtt_orig_init = 0;
-int wifi_finally_con = 0;
-int splash_on = 1;
+int mqttOrigInit = 0;
+int wifiFinallyConn = 0;
+int splashOn = 1;
 
-int mqtt_state = 0;
-uint8_t mqtt_state_anim_t = registerTimer(500);
-int mqtt_anim_p = 0;
+int mqttState = 0;
+uint8_t mqttStateAnimT = registerTimer(500);
+int mqttAnimP = 0;
 
-int wifi_state = 0;
+int wifiState = 0;
 
-uint8_t off_anim_t = registerTimer(50);
-int off_x_v;
-int off_y_v;
-int off_x = 55;
-int off_y = 25;
+uint8_t offAnimT = registerTimer(50);
+int offXv;
+int offYv;
+int offX = 55;
+int offY = 25;
 
 void setup() {
   Serial.begin(115200);
@@ -130,7 +130,7 @@ void setup() {
   offAnimRandomVector(1, 1);
 
   Serial.print("Booting as ");
-  Serial.println(device_id);
+  Serial.println(deviceId);
 
   // initialize with the I2C addr 0x3D (for the OLED)
   display.begin(SSD1306_SWITCHCAPVCC, 0x3D);
@@ -167,36 +167,36 @@ void drawSplashScreen() {
 
 void setupWifi() {
 
-  if(wifi_orig_init == 0 && millis() > 10000) {
-    wifi_orig_init = 1;
-  
+  if (wifiOrigInit == 0 && millis() > 10000) {
+    wifiOrigInit = 1;
+
     Serial.println();
     Serial.print("Connecting to ");
     Serial.println(ssid);
-  
+
     WiFi.begin(ssid, password);
   }
-  else{
-    if(wifi_finally_con == 0 && WiFi.status() == WL_CONNECTED) {
+  else {
+    if (wifiFinallyConn == 0 && WiFi.status() == WL_CONNECTED) {
       Serial.println("");
       Serial.println("WiFi connected");
       Serial.println("IP address: ");
       Serial.println(WiFi.localIP());
-      wifi_state = 1;
-      wifi_finally_con = 1;
+      wifiState = 1;
+      wifiFinallyConn = 1;
       screenUpdate = 1;
     }
   }
 }
 
 /**
- * Core device loop, which checks inputs across all channels, applies changes, and then redraws.
- */
+   Core device loop, which checks inputs across all channels, applies changes, and then redraws.
+*/
 void loop() {
   checkNetworkStatus();
 
   processTimers();
-  
+
   checkButtons();
 
   checkIrSensor();
@@ -207,21 +207,21 @@ void loop() {
 void checkNetworkStatus() {
   setupWifi();
 
-  if(WiFi.status() == WL_CONNECTED) {
-    if(wifi_state != 1) {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiState != 1) {
       screenUpdate = 1;
     }
-    wifi_state = 1;
+    wifiState = 1;
   }
   else {
-    if(wifi_state != 0) {
+    if (wifiState != 0) {
       screenUpdate = 1;
     }
-    wifi_state = 0;
+    wifiState = 0;
   }
 
-  mqtt_state = checkMqtt();
-  switch(mqtt_state) {
+  mqttState = checkMqtt();
+  switch (mqttState) {
     case -1: // Retrying
       break;
     case 0: // Unstarted
@@ -230,7 +230,7 @@ void checkNetworkStatus() {
       break;
     case 2: // Reconnected
       screenUpdate = 1;
-      syncDeviceState(power_state, temp, mode_sel, fan_sel);
+      syncDeviceState(powerState, temp, modeSel, fanSel);
       break;
     default: Serial.println("Unknown MQTT network state");
   }
@@ -238,82 +238,82 @@ void checkNetworkStatus() {
 
 void drawScreen(void) {
 
-  if(mqtt_state != 1 && mqtt_state != 2 && splash_on == 0) {
-    if(isTimerPassed(mqtt_state_anim_t)) {
+  if (mqttState != 1 && mqttState != 2 && splashOn == 0) {
+    if (isTimerPassed(mqttStateAnimT)) {
       screenUpdate = 1;
-      resetTimer(mqtt_state_anim_t);
-      mqtt_anim_p = 1 - mqtt_anim_p;
+      resetTimer(mqttStateAnimT);
+      mqttAnimP = 1 - mqttAnimP;
     }
   }
 
-  if(power_state == 0) {
-    if(isTimerPassed(off_anim_t)) {
-      resetTimer(off_anim_t);
+  if (powerState == 0) {
+    if (isTimerPassed(offAnimT)) {
+      resetTimer(offAnimT);
       screenUpdate = 1;
 
-      off_x += off_x_v;
-      off_y += off_y_v;
-      
-      if(off_x <= 0 || off_x >= 95) {
+      offX += offXv;
+      offY += offYv;
+
+      if (offX <= 0 || offX >= 95) {
         offAnimRandomVector(1, 0);
-        if(off_x <= 0) {
-          off_x = 1;
+        if (offX <= 0) {
+          offX = 1;
         }
         else {
-          off_x = 95;
-          off_x_v *= -1;
+          offX = 95;
+          offXv *= -1;
         }
       }
-      
-      if(off_y <= 20 || off_y >= 64) {
+
+      if (offY <= 20 || offY >= 64) {
         offAnimRandomVector(0, 1);
-        if(off_y <= 20) {
-          off_y = 20;
+        if (offY <= 20) {
+          offY = 20;
         }
         else {
-          off_y = 64;
-          off_y_v *= -1;
+          offY = 64;
+          offYv *= -1;
         }
       }
     }
   }
 
   // Only update if we need to. We want the splash screen to display at startup for a while, too.
-  if(screenUpdate == 1 || (millis() > 5000 && splash_on == 1)){
-    splash_on = 0;
+  if (screenUpdate == 1 || (millis() > 5000 && splashOn == 1)) {
+    splashOn = 0;
     display.clearDisplay();
-    
-    if(power_state == 1){ 
+
+    if (powerState == 1) {
       display.setFont(&FreeSans12pt7b);
       display.setTextSize(4);
-      display.setCursor(27,64);
+      display.setCursor(27, 64);
       display.print(temp);
-  
+
       display.setFont(&TomThumb);
       display.setTextSize(2);
       display.setCursor(0, 17);
-      display.print(mode_map[mode_sel]);
+      display.print(modeMap[modeSel]);
       display.setCursor(0, 64);
-      display.print(fan_map[fan_sel]);
+      display.print(fanMap[fanSel]);
     }
-    else{
+    else {
       display.setFont(&FreeSans12pt7b);
       display.setTextSize(1);
-      display.setCursor(off_x, off_y);
+      display.setCursor(offX, offY);
       display.print("Off");
     }
 
-    if(mqtt_state != 1 && mqtt_state != 2) {
+    if (mqttState != 1 && mqttState != 2) {
       display.setFont(&TomThumb);
       display.setTextSize(1);
       display.setCursor(0, 30);
       display.print("no mqtt");
-      if(mqtt_anim_p) {
+      if (mqttAnimP) {
         display.print("*");
       }
     }
 
-    if(wifi_state == 0) {
+    if (wifiState == 0) {
       display.setFont(&TomThumb);
       display.setTextSize(1);
       display.setCursor(0, 40);
@@ -326,41 +326,41 @@ void drawScreen(void) {
 }
 
 /**
- * Check all the buttons on the device, not allowing a button to be held down for repeat commands.
- * When the AC is off, this will only allow power button to be pressed.
- */
+   Check all the buttons on the device, not allowing a button to be held down for repeat commands.
+   When the AC is off, this will only allow power button to be pressed.
+*/
 void checkButtons(void) {
 
-  if(buttonPressed == 1 && mcp.digitalRead(B_TEMP_U) == 0 && mcp.digitalRead(B_TEMP_D) == 0 
-    && mcp.digitalRead(B_MODE) == 0 && mcp.digitalRead(B_FAN) == 0 && mcp.digitalRead(B_POWER) == 0){
+  if (buttonPressed == 1 && mcp.digitalRead(B_TEMP_U) == 0 && mcp.digitalRead(B_TEMP_D) == 0
+      && mcp.digitalRead(B_MODE) == 0 && mcp.digitalRead(B_FAN) == 0 && mcp.digitalRead(B_POWER) == 0) {
     buttonPressed = 0;
   }
 
-  if(mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
+  if (mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
     Serial.println("B_POWER Button Pressed");
     togglePower();
   }
 
-  if(power_state == 0) {
+  if (powerState == 0) {
     return;
   }
 
-  if(mcp.digitalRead(B_TEMP_D) == 1 && buttonPressed == 0 && temp > 59) {
+  if (mcp.digitalRead(B_TEMP_D) == 1 && buttonPressed == 0 && temp > 59) {
     Serial.println("B_TEMP_D Button Pressed");
     lowerTemp();
   }
 
-  if(mcp.digitalRead(B_TEMP_U) == 1 && buttonPressed == 0 && temp < 90) {
+  if (mcp.digitalRead(B_TEMP_U) == 1 && buttonPressed == 0 && temp < 90) {
     Serial.println("B_TEMP_U Button Pressed");
     raiseTemp();
   }
 
-  if(mcp.digitalRead(B_MODE) == 1 && buttonPressed == 0) {
+  if (mcp.digitalRead(B_MODE) == 1 && buttonPressed == 0) {
     Serial.println("B_MODE Button Pressed");
     cycleMode();
   }
 
-  if(mcp.digitalRead(B_FAN) == 1 && buttonPressed == 0) {
+  if (mcp.digitalRead(B_FAN) == 1 && buttonPressed == 0) {
     Serial.println("B_FAN Button Pressed");
     cycleFan();
   }
@@ -378,7 +378,7 @@ void checkIrSensor(void) {
 }
 
 void processIrCommand(uint64_t code) {
-  switch(code) {
+  switch (code) {
     case FC_POWER_T : Serial.println("Power flash"); togglePower(); break;
     case FC_TEMP_UP : Serial.println("Temp Up flash"); raiseTemp(); break;
     case FC_TEMP_DN : Serial.println("Temp Down flash"); lowerTemp(); break;
@@ -393,7 +393,7 @@ void processIrCommand(uint64_t code) {
 }
 
 void togglePower(void) {
-  power_state = (power_state + 1) % 2;
+  powerState = (powerState + 1) % 2;
   controlAc(FC_POWER_T);
   buttonPressed = 1;
   screenUpdate = 1;
@@ -414,23 +414,23 @@ void lowerTemp(void) {
 }
 
 void cycleMode(void) {
-  mode_sel = (mode_sel + 1) % mode_len;
-  controlAc(mode_fc_map[mode_sel]);
+  modeSel = (modeSel + 1) % modeLen;
+  controlAc(modeFcMap[modeSel]);
   buttonPressed = 1;
   screenUpdate = 1;
 }
 
 void cycleFan(void) {
-  fan_sel = (fan_sel + 1) % fan_len;
+  fanSel = (fanSel + 1) % fanLen;
   controlAc(FC_FAN_DN);
   buttonPressed = 1;
   screenUpdate = 1;
 }
 
 void fanUp(void) {
-  fan_sel--;
-  if(fan_sel < 0){
-    fan_sel = fan_len - 1;
+  fanSel--;
+  if (fanSel < 0) {
+    fanSel = fanLen - 1;
   }
   controlAc(FC_FAN_UP);
   buttonPressed = 1;
@@ -438,21 +438,21 @@ void fanUp(void) {
 }
 
 void modeSet(uint64_t mode) {
-  if(mode == FC_COOL){
-    mode_sel = 0;
+  if (mode == FC_COOL) {
+    modeSel = 0;
   }
-  else if(mode == FC_SAVE){
-    mode_sel = 1;
+  else if (mode == FC_SAVE) {
+    modeSel = 1;
   }
-  else{
-    mode_sel = 2;
+  else {
+    modeSel = 2;
   }
   screenUpdate = 1;
   controlAc(mode);
 }
 
-void fanSet(uint64_t setting){
-  fan_sel = 0;
+void fanSet(uint64_t setting) {
+  fanSel = 0;
   controlAc(setting);
   screenUpdate = 1;
 }
@@ -462,11 +462,11 @@ void controlAc(const uint64_t command) {
   serialPrintUint64(command, 16);
   Serial.println("");
   irsend.sendNEC(command, 32);
-  syncDeviceState(power_state, temp, mode_sel, fan_sel);
+  syncDeviceState(powerState, temp, modeSel, fanSel);
 }
 
 void offAnimRandomVector(int changeX, int changeY) {
-  off_x_v = changeX ? random(1, 4) : off_x_v;
-  off_y_v = changeY ? random(1, 4) : off_y_v;
+  offXv = changeX ? random(1, 4) : offXv;
+  offYv = changeY ? random(1, 4) : offYv;
 }
 

@@ -10,25 +10,25 @@ PubSubClient client(espClient);
 
 long lastMsg = 0;
 char msg[100];
-int wifi_orig_init = 0;
+int wifiOrigInit = 0;
 
-const char* device_id = "ac_alpha";
-const char* device_id_topic = "ac/ac_alpha";
-const char* device_sync_topic = "ac/sync/ac_alpha";
-const char* mqtt_server = WIFI_SERV;
+const char* deviceId = "ac_alpha";
+const char* deviceIdTopic = "ac/ac_alpha";
+const char* deviceSyncTopic = "ac/sync/ac_alpha";
+const char* mqttServer = WIFI_SERV;
 
-int first_conn = 1;
+int firstConn = 1;
 
-int mqtt_retry_t = registerTimer(30000);
+int mqttRetryT = registerTimer(30000);
 
 void mqttSetup() {
-  client.setServer(mqtt_server, 1883);
+  client.setServer(mqttServer, 1883);
   client.setCallback(callback);
 }
 
 /**
- * Used by the MQTT handler to process messages from topics we are subscribed to.
- */
+   Used by the MQTT handler to process messages from topics we are subscribed to.
+*/
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
@@ -40,19 +40,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 /**
- * Used to reconnect to the MQTT server, *NOT* the WiFi.
- */
+   Used to reconnect to the MQTT server, *NOT* the WiFi.
+*/
 int reconnect() {
-  if(first_conn || isTimerPassed(mqtt_retry_t)) {
-    first_conn = 0;
-    
+  if (firstConn || isTimerPassed(mqttRetryT)) {
+    firstConn = 0;
+
     Serial.print("Attempting MQTT connection...");
 
-    if (client.connect(device_id)) {
+    // Unfortunately, the below call within the if-statement is blocking. As the
+    // server is on the local network, timeouts are fast if the host is on, but
+    // not listening on that port. Will test host off to see how long it takes.
+    if (client.connect(deviceId)) {
       Serial.println("connected");
-      client.subscribe(device_id_topic);
-      
-      snprintf (msg, 75, "name:%s", device_id);
+      client.subscribe(deviceIdTopic);
+
+      snprintf (msg, 75, "name:%s", deviceId);
       client.publish("activate", msg);
       return 2;
     }
@@ -60,7 +63,7 @@ int reconnect() {
       Serial.print("failed, rc = ");
       Serial.print(client.state());
       Serial.println(" trying again in 30 seconds");
-      resetTimer(mqtt_retry_t);
+      resetTimer(mqttRetryT);
       return -1;
     }
   }
@@ -70,16 +73,16 @@ int reconnect() {
 
 int checkMqtt() {
 
-  if(wifi_orig_init == 1) {
+  if (wifiOrigInit == 1) {
     if (!client.connected()) {
       return reconnect();
     }
-    else{
+    else {
       client.loop();
       return 1;
     }
   }
-  
+
   return 0;
 }
 
@@ -87,6 +90,6 @@ void syncDeviceState(int powered, int temp, int mode, int fan) {
   snprintf (msg, 100, "{\"powered\":%d,\"temperature\":%d,\"mode\":%d,\"fanSpeed\":%d}", powered, temp, mode, fan);
   Serial.print("Syncing state: ");
   Serial.println(msg);
-  client.publish(device_sync_topic, msg);
+  client.publish(deviceSyncTopic, msg);
 }
 

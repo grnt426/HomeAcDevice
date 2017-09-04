@@ -10,7 +10,7 @@ uint64_t oldTime = 0;
 int registerTimer(uint64_t delay) {
 
   // You are using too many timers. Increase array size.
-  if(freeSlot >= maxTimers) {
+  if (freeSlot >= maxTimers) {
     Serial.println("\n***\nYou are using too many timers, make the array bigger!\n***");
     freeSlot = freeSlot / 0; // force a crash so this error is noticed and fixed
   }
@@ -31,7 +31,7 @@ void processTimers() {
 
   // This will only be true if the millis() function rolled over.
   // For simplicity, do nothing
-  if(time < oldTime) {
+  if (time < oldTime) {
     Serial.println("Rolling over timer...");
     delta = sizeof(uint64_t) - oldTime;
     delta += time;
@@ -42,10 +42,10 @@ void processTimers() {
   }
   oldTime = time;
 
-  for(int i = 0; i < freeSlot; i++) {
+  for (int i = 0; i < freeSlot; i++) {
 
     // To avoid overflowing the accumulator (and therefore missing a timer passing), don't keep adding after activating
-    if(accumulators[i] < timers[i]) {
+    if (accumulators[i] < timers[i]) {
       accumulators[i] += delta;
     }
   }
