@@ -25,4 +25,6 @@ void mqttSetup();
 
 void syncDeviceState(int powered, int temp, int mode, int fan);
 
+void overwriteDeviceState(char* payload);
+
 #endif

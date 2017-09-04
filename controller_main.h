@@ -33,4 +33,8 @@ void checkNetworkStatus();
 
 void offAnimRandomVector(int x, int y);
 
+void overwriteAcState(int powered, int temp, int mode, int fanSpeed);
+
+int isWifiConnected();
+
 #endif

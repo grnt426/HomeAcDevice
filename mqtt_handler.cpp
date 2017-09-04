@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+#include <ArduinoJson.h>
 #include "mqtt_handler.h"
 #include "controller_main.h"
 #include "timer.h"
@@ -15,11 +16,14 @@ int wifiOrigInit = 0;
 const char* deviceId = "ac_alpha";
 const char* deviceIdTopic = "ac/ac_alpha";
 const char* deviceSyncTopic = "ac/sync/ac_alpha";
+const char* overwriteDeviceStateTopic = "ac/overwrite/ac_alpha";
 const char* mqttServer = WIFI_SERV;
 
 int firstConn = 1;
 
-int mqttRetryT = registerTimer(30000);
+int mqttRetryT = registerTimer(15000);
+
+StaticJsonBuffer<200> jsonBuffer;
 
 void mqttSetup() {
   client.setServer(mqttServer, 1883);
@@ -36,15 +40,25 @@ void callback(char* topic, byte* payload, unsigned int length) {
   char* str = (char *) payload;
   str[length] = '\0';
   Serial.println(str);
-  processIrCommand((int)strtol(str, NULL, 0));
+  
+  if (strcmp(topic, deviceIdTopic) == 0) {
+
+    // On this topic, we will always just receive a simple hex flash-code.
+    processIrCommand((int)strtol(str, NULL, 0));
+  }
+  else if (strcmp(topic, overwriteDeviceStateTopic) == 0) {
+    overwriteDeviceState(str);
+  }
+  else {
+    Serial.println("Warn: Subscribed to a topic that can't be processed?!?");
+  }
 }
 
 /**
    Used to reconnect to the MQTT server, *NOT* the WiFi.
 */
 int reconnect() {
-  if (firstConn || isTimerPassed(mqttRetryT)) {
-    firstConn = 0;
+  if (isTimerPassed(mqttRetryT)) {
 
     Serial.print("Attempting MQTT connection...");
 
@@ -54,15 +68,26 @@ int reconnect() {
     if (client.connect(deviceId)) {
       Serial.println("connected");
       client.subscribe(deviceIdTopic);
+      client.subscribe(overwriteDeviceStateTopic);
 
-      snprintf (msg, 75, "name:%s", deviceId);
-      client.publish("activate", msg);
-      return 2;
+      if (firstConn) {
+        Serial.println("First MQTT connection, activating");
+        firstConn = 0;
+        snprintf (msg, 75, "name:%s", deviceId);
+        client.publish("activate", msg);
+        return 3;
+      }
+      else {
+        Serial.println("Telling server we reconnected to MQTT");
+        snprintf (msg, 75, "name:%s", deviceId);
+        client.publish("reconnect", msg);
+        return 2;
+      }
     }
     else {
       Serial.print("failed, rc = ");
       Serial.print(client.state());
-      Serial.println(" trying again in 30 seconds");
+      Serial.println(" trying again in 15 seconds");
       resetTimer(mqttRetryT);
       return -1;
     }
@@ -73,7 +98,7 @@ int reconnect() {
 
 int checkMqtt() {
 
-  if (wifiOrigInit == 1) {
+  if (isWifiConnected()) {
     if (!client.connected()) {
       return reconnect();
     }
@@ -84,6 +109,12 @@ int checkMqtt() {
   }
 
   return 0;
+}
+
+void overwriteDeviceState(char* payload) {
+  Serial.println("Restoring state...");
+  JsonObject& root = jsonBuffer.parseObject(payload);
+  overwriteAcState(root["powered"], root["temperature"], root["mode"], root["fanSpeed"]);
 }
 
 void syncDeviceState(int powered, int temp, int mode, int fan) {

@@ -32,6 +32,9 @@ You can use the Arduino's builtin library manager to automatically download the 
 * PubSubClient
   * 2.6.0
   * for chatting with an MQTT server
+* ArduinoJson
+  * 5.11.0
+  * For parsing JSON payloads from the HomeServer
 
 Library Modifications
 ---------------------

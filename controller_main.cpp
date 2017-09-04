@@ -81,7 +81,7 @@ Adafruit_MCP23008 mcp;
 /**
    Device State Information
 */
-uint8_t temp = 72;
+uint8_t acTemp = 72;
 
 // 0 indicates no button is currently held down, 1 means at least one button is held down
 uint8_t buttonPressed = 0;
@@ -207,19 +207,6 @@ void loop() {
 void checkNetworkStatus() {
   setupWifi();
 
-  if (WiFi.status() == WL_CONNECTED) {
-    if (wifiState != 1) {
-      screenUpdate = 1;
-    }
-    wifiState = 1;
-  }
-  else {
-    if (wifiState != 0) {
-      screenUpdate = 1;
-    }
-    wifiState = 0;
-  }
-
   mqttState = checkMqtt();
   switch (mqttState) {
     case -1: // Retrying
@@ -229,8 +216,11 @@ void checkNetworkStatus() {
     case 1: // Still connected
       break;
     case 2: // Reconnected
+      syncDeviceState(powerState, acTemp, modeSel, fanSel);
+      Serial.print("Re");
+    case 3: // Connected
+      Serial.println("connected to MQTT");
       screenUpdate = 1;
-      syncDeviceState(powerState, temp, modeSel, fanSel);
       break;
     default: Serial.println("Unknown MQTT network state");
   }
@@ -238,7 +228,7 @@ void checkNetworkStatus() {
 
 void drawScreen(void) {
 
-  if (mqttState != 1 && mqttState != 2 && splashOn == 0) {
+  if (mqttState != 1 && mqttState != 2 && mqttState != 3 && splashOn == 0) {
     if (isTimerPassed(mqttStateAnimT)) {
       screenUpdate = 1;
       resetTimer(mqttStateAnimT);
@@ -287,7 +277,7 @@ void drawScreen(void) {
       display.setFont(&FreeSans12pt7b);
       display.setTextSize(4);
       display.setCursor(27, 64);
-      display.print(temp);
+      display.print(acTemp);
 
       display.setFont(&TomThumb);
       display.setTextSize(2);
@@ -311,13 +301,6 @@ void drawScreen(void) {
       if (mqttAnimP) {
         display.print("*");
       }
-    }
-
-    if (wifiState == 0) {
-      display.setFont(&TomThumb);
-      display.setTextSize(1);
-      display.setCursor(0, 40);
-      display.print("no wifi");
     }
 
     screenUpdate = 0;
@@ -345,12 +328,12 @@ void checkButtons(void) {
     return;
   }
 
-  if (mcp.digitalRead(B_TEMP_D) == 1 && buttonPressed == 0 && temp > 59) {
+  if (mcp.digitalRead(B_TEMP_D) == 1 && buttonPressed == 0 && acTemp > 59) {
     Serial.println("B_TEMP_D Button Pressed");
     lowerTemp();
   }
 
-  if (mcp.digitalRead(B_TEMP_U) == 1 && buttonPressed == 0 && temp < 90) {
+  if (mcp.digitalRead(B_TEMP_U) == 1 && buttonPressed == 0 && acTemp < 90) {
     Serial.println("B_TEMP_U Button Pressed");
     raiseTemp();
   }
@@ -393,27 +376,37 @@ void processIrCommand(uint64_t code) {
 }
 
 void togglePower(void) {
+  Serial.println("Toggling power");
   powerState = (powerState + 1) % 2;
+
+  // When the AC comes back on, if we were previously on cool,
+  // that has changed to energy save (AC does this all its own).
+  if(powerState && modeSel == 0) {
+    modeSel = 1;
+  }
   controlAc(FC_POWER_T);
   buttonPressed = 1;
   screenUpdate = 1;
 }
 
 void raiseTemp(void) {
-  temp++;
+  Serial.println("Raise Temp");
+  acTemp++;
   controlAc(FC_TEMP_UP);
   buttonPressed = 1;
   screenUpdate = 1;
 }
 
 void lowerTemp(void) {
-  temp--;
+  Serial.println("Lower temp");
+  acTemp--;
   controlAc(FC_TEMP_DN);
   buttonPressed = 1;
   screenUpdate = 1;
 }
 
 void cycleMode(void) {
+  Serial.println("Cycling mode");
   modeSel = (modeSel + 1) % modeLen;
   controlAc(modeFcMap[modeSel]);
   buttonPressed = 1;
@@ -421,6 +414,7 @@ void cycleMode(void) {
 }
 
 void cycleFan(void) {
+  Serial.println("Cycling fan");
   fanSel = (fanSel + 1) % fanLen;
   controlAc(FC_FAN_DN);
   buttonPressed = 1;
@@ -428,6 +422,7 @@ void cycleFan(void) {
 }
 
 void fanUp(void) {
+  Serial.println("fan up");
   fanSel--;
   if (fanSel < 0) {
     fanSel = fanLen - 1;
@@ -438,6 +433,7 @@ void fanUp(void) {
 }
 
 void modeSet(uint64_t mode) {
+  Serial.println("mode set");
   if (mode == FC_COOL) {
     modeSel = 0;
   }
@@ -452,6 +448,7 @@ void modeSet(uint64_t mode) {
 }
 
 void fanSet(uint64_t setting) {
+  Serial.println("fan set");
   fanSel = 0;
   controlAc(setting);
   screenUpdate = 1;
@@ -462,11 +459,24 @@ void controlAc(const uint64_t command) {
   serialPrintUint64(command, 16);
   Serial.println("");
   irsend.sendNEC(command, 32);
-  syncDeviceState(powerState, temp, modeSel, fanSel);
+  syncDeviceState(powerState, acTemp, modeSel, fanSel);
+}
+
+void overwriteAcState(int powered, int t, int mode, int fanSpeed) {
+  powerState = powered;
+  acTemp = t;
+  modeSel = mode;
+  fanSel = fanSpeed;
+  screenUpdate = 1;
+  Serial.println("AC State overridden");
 }
 
 void offAnimRandomVector(int changeX, int changeY) {
   offXv = changeX ? random(1, 4) : offXv;
   offYv = changeY ? random(1, 4) : offYv;
+}
+
+int isWifiConnected() {
+  return wifiFinallyConn;
 }
 
