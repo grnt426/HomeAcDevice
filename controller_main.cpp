@@ -354,5 +354,6 @@ void controlAc(const uint64_t command) {
   serialPrintUint64(command, 16);
   Serial.println("");
   irsend.sendNEC(command, 32);
+  syncDeviceState(power_state, temp, mode_sel, fan_sel);
 }
 
