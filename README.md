@@ -35,6 +35,9 @@ You can use the Arduino's builtin library manager to automatically download the 
 * ArduinoJson
   * 5.11.0
   * For parsing JSON payloads from the HomeServer
+* [HomeAutomationLibrary](https://github.com/grnt426/HomeAutomationLibrary)
+  * 1.0.0
+  * Common features of devices within my home 
 
 Library Modifications
 ---------------------
