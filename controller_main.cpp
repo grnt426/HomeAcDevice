@@ -11,19 +11,23 @@
 #include <IRutils.h>
 #include <IRsend.h>
 #include <ESP8266WiFi.h>
+#include <ArduinoJson.h>
+#include <TimerManager.h>
+#include <MqttClient.h>
+#include <WifiHandler.h>
 #include "controller_main.h"
 #include "wifi_pass.secret.h"
 #include "granite_logo.h"
-#include "mqtt_handler.h"
-#include "timer.h"
+
+const char* deviceId = "ac_alpha";
 
 #define OLED_RESET 0
 
 // Button Map on the MCP (8-bit address)
-#define B_TEMP_D 0
-#define B_TEMP_U 1
-#define B_MODE   2
-#define B_FAN    3
+#define B_TEMP_D 3
+#define B_TEMP_U 2
+#define B_MODE   1
+#define B_FAN    0
 #define B_POWER  4
 #define B_UNDF   5
 #define B_UNDF_2 6
@@ -60,10 +64,11 @@ Adafruit_SSD1306 display(OLED_RESET);
 
 #ifndef WIFI_SECRET
 #error("Please create a wifi_pass.secret.h file with wifi credentials. See the project page for informaiton: https://github.com/grnt426/HomeAcDevice")
-#else
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASS;
 #endif
+
+WifiHandler wifiHandler(WIFI_SSID, WIFI_PASS);
+MqttClient mqttClient(deviceId, callback, &wifiHandler, WIFI_SERV);
+StaticJsonBuffer<200> jsonBuffer;
 
 /**
    IR LED/Sensor Setup
@@ -72,6 +77,8 @@ IRsend irsend(P_IR_LED);
 IRrecv irrecv(P_IR_SEN);
 decode_results results;
 irparams_t save;
+
+TimerManager timer;
 
 /**
    MCP (Port Expander) Setup
@@ -111,16 +118,18 @@ int wifiFinallyConn = 0;
 int splashOn = 1;
 
 int mqttState = 0;
-uint8_t mqttStateAnimT = registerTimer(500);
+uint8_t mqttStateAnimT = timer.registerTimer(500);
 int mqttAnimP = 0;
 
 int wifiState = 0;
 
-uint8_t offAnimT = registerTimer(50);
+uint8_t offAnimT = timer.registerTimer(50);
 int offXv;
 int offYv;
 int offX = 55;
 int offY = 25;
+
+char msg[100];
 
 void setup() {
   Serial.begin(115200);
@@ -133,6 +142,7 @@ void setup() {
   Serial.println(deviceId);
 
   // initialize with the I2C addr 0x3D (for the OLED)
+  display.setRotation(2);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3D);
   display.clearDisplay();
   display.setTextColor(WHITE);
@@ -145,18 +155,16 @@ void setup() {
   mcp.pinMode(B_TEMP_U, INPUT);
   mcp.pinMode(B_MODE, INPUT);
   mcp.pinMode(B_FAN, INPUT);
-  mcp.pinMode(B_POWER, INPUT);
+  //mcp.pinMode(B_POWER, INPUT);
 
   mcp.pullUp(B_TEMP_D, HIGH);
   mcp.pullUp(B_TEMP_U, HIGH);
   mcp.pullUp(B_MODE, HIGH);
   mcp.pullUp(B_FAN, HIGH);
-  mcp.pullUp(B_POWER, HIGH);
+//  mcp.pullUp(B_POWER, LOW);
 
   pinMode(P_IR_LED, OUTPUT);
   irrecv.enableIRIn();
-
-  mqttSetup();
 }
 
 void drawSplashScreen() {
@@ -165,29 +173,7 @@ void drawSplashScreen() {
   display.display();
 }
 
-void setupWifi() {
 
-  if (wifiOrigInit == 0 && millis() > 10000) {
-    wifiOrigInit = 1;
-
-    Serial.println();
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-
-    WiFi.begin(ssid, password);
-  }
-  else {
-    if (wifiFinallyConn == 0 && WiFi.status() == WL_CONNECTED) {
-      Serial.println("");
-      Serial.println("WiFi connected");
-      Serial.println("IP address: ");
-      Serial.println(WiFi.localIP());
-      wifiState = 1;
-      wifiFinallyConn = 1;
-      screenUpdate = 1;
-    }
-  }
-}
 
 /**
    Core device loop, which checks inputs across all channels, applies changes, and then redraws.
@@ -195,7 +181,7 @@ void setupWifi() {
 void loop() {
   checkNetworkStatus();
 
-  processTimers();
+  timer.loop();
 
   checkButtons();
 
@@ -205,9 +191,11 @@ void loop() {
 }
 
 void checkNetworkStatus() {
-  setupWifi();
+  if(wifiHandler.loop() == 1) {
+    screenUpdate = 1;
+  }
 
-  mqttState = checkMqtt();
+  mqttState = mqttClient.loop();
   switch (mqttState) {
     case -1: // Retrying
       break;
@@ -229,16 +217,16 @@ void checkNetworkStatus() {
 void drawScreen(void) {
 
   if (mqttState != 1 && mqttState != 2 && mqttState != 3 && splashOn == 0) {
-    if (isTimerPassed(mqttStateAnimT)) {
+    if (timer.isTimerPassed(mqttStateAnimT)) {
       screenUpdate = 1;
-      resetTimer(mqttStateAnimT);
+      timer.resetTimer(mqttStateAnimT);
       mqttAnimP = 1 - mqttAnimP;
     }
   }
 
   if (powerState == 0) {
-    if (isTimerPassed(offAnimT)) {
-      resetTimer(offAnimT);
+    if (timer.isTimerPassed(offAnimT)) {
+      timer.resetTimer(offAnimT);
       screenUpdate = 1;
 
       offX += offXv;
@@ -315,14 +303,17 @@ void drawScreen(void) {
 void checkButtons(void) {
 
   if (buttonPressed == 1 && mcp.digitalRead(B_TEMP_U) == 0 && mcp.digitalRead(B_TEMP_D) == 0
-      && mcp.digitalRead(B_MODE) == 0 && mcp.digitalRead(B_FAN) == 0 && mcp.digitalRead(B_POWER) == 0) {
+      && mcp.digitalRead(B_MODE) == 0 && mcp.digitalRead(B_FAN) == 0) {
+    Serial.println("Button released");
     buttonPressed = 0;
   }
 
-  if (mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
-    Serial.println("B_POWER Button Pressed");
-    togglePower();
-  }
+  int before = buttonPressed;
+
+//  if (mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
+//    Serial.println("B_POWER Button Pressed");
+//    togglePower();
+//  }
 
   if (powerState == 0) {
     return;
@@ -346,6 +337,17 @@ void checkButtons(void) {
   if (mcp.digitalRead(B_FAN) == 1 && buttonPressed == 0) {
     Serial.println("B_FAN Button Pressed");
     cycleFan();
+  }
+
+  if(random(45) == 9) {
+    Serial.print("Temp D: ");
+    Serial.println(mcp.digitalRead(B_TEMP_D));
+    Serial.print("Temp U: ");
+    Serial.println(mcp.digitalRead(B_TEMP_U));
+    Serial.print("Mode: ");
+    Serial.println(mcp.digitalRead(B_MODE));
+    Serial.print("Fan: ");
+    Serial.println(mcp.digitalRead(B_FAN));
   }
 }
 
@@ -476,7 +478,41 @@ void offAnimRandomVector(int changeX, int changeY) {
   offYv = changeY ? random(1, 4) : offYv;
 }
 
-int isWifiConnected() {
-  return wifiFinallyConn;
+
+/**
+   Used by the MQTT handler to process messages from topics we are subscribed to.
+*/
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  char* str = (char *) payload;
+  str[length] = '\0';
+  Serial.println(str);
+  
+  if (strcmp(topic, mqttClient.deviceIdTopic) == 0) {
+
+    // On this topic, we will always just receive a simple hex flash-code.
+    processIrCommand((int)strtol(str, NULL, 0));
+  }
+  else if (strcmp(topic, mqttClient.overwriteDeviceStateTopic) == 0) {
+    overwriteDeviceState(str);
+  }
+  else {
+    Serial.println("Warn: Subscribed to a topic that can't be processed?!?");
+  }
+}
+
+void overwriteDeviceState(char* payload) {
+  Serial.println("Restoring state...");
+  JsonObject& root = jsonBuffer.parseObject(payload);
+  overwriteAcState(root["powered"], root["temperature"], root["mode"], root["fanSpeed"]);
+}
+
+void syncDeviceState(int powered, int temp, int mode, int fan) {
+  snprintf (msg, 100, "{\"powered\":%d,\"temperature\":%d,\"mode\":%d,\"fanSpeed\":%d}", powered, temp, mode, fan);
+  Serial.print("Syncing state: ");
+  Serial.println(msg);
+  mqttClient.publishMessage(mqttClient.deviceSyncTopic, msg);
 }
 
