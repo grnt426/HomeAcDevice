@@ -155,13 +155,13 @@ void setup() {
   mcp.pinMode(B_TEMP_U, INPUT);
   mcp.pinMode(B_MODE, INPUT);
   mcp.pinMode(B_FAN, INPUT);
-  //mcp.pinMode(B_POWER, INPUT);
+  mcp.pinMode(B_POWER, INPUT);
 
   mcp.pullUp(B_TEMP_D, HIGH);
   mcp.pullUp(B_TEMP_U, HIGH);
   mcp.pullUp(B_MODE, HIGH);
   mcp.pullUp(B_FAN, HIGH);
-//  mcp.pullUp(B_POWER, LOW);
+  mcp.pullUp(B_POWER, HIGH);
 
   pinMode(P_IR_LED, OUTPUT);
   irrecv.enableIRIn();
@@ -179,9 +179,9 @@ void drawSplashScreen() {
    Core device loop, which checks inputs across all channels, applies changes, and then redraws.
 */
 void loop() {
-  checkNetworkStatus();
-
   timer.loop();
+  
+  checkNetworkStatus();
 
   checkButtons();
 
@@ -310,10 +310,10 @@ void checkButtons(void) {
 
   int before = buttonPressed;
 
-//  if (mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
-//    Serial.println("B_POWER Button Pressed");
-//    togglePower();
-//  }
+  if (mcp.digitalRead(B_POWER) == 1 && buttonPressed == 0) {
+    Serial.println("B_POWER Button Pressed");
+    togglePower();
+  }
 
   if (powerState == 0) {
     return;
@@ -337,17 +337,6 @@ void checkButtons(void) {
   if (mcp.digitalRead(B_FAN) == 1 && buttonPressed == 0) {
     Serial.println("B_FAN Button Pressed");
     cycleFan();
-  }
-
-  if(random(45) == 9) {
-    Serial.print("Temp D: ");
-    Serial.println(mcp.digitalRead(B_TEMP_D));
-    Serial.print("Temp U: ");
-    Serial.println(mcp.digitalRead(B_TEMP_U));
-    Serial.print("Mode: ");
-    Serial.println(mcp.digitalRead(B_MODE));
-    Serial.print("Fan: ");
-    Serial.println(mcp.digitalRead(B_FAN));
   }
 }
 
